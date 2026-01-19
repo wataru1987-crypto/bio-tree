@@ -36,6 +36,8 @@ type SelectedTaxon = {
   id: string;
   labelText: string;
   rank: string;
+  memo?: string;
+  photos?: string[]; // dataURL(base64)
 };
 
 type Selected =
@@ -125,7 +127,7 @@ function buildInitialFlow(): { nodes: Node[]; edges: Edge[] } {
       id: n.id,
       type: "taxon",
       position: { x: d * xGap, y: idx * yGap },
-      data: { kind: "taxon", rank: n.rank, labelText: n.label },
+      data: { kind: "taxon", rank: n.rank, labelText: n.label, memo: "", photos: [] },
       style: { background: "white", borderStyle: "solid", borderColor: "#111", ...rankStyle(n.rank) },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
@@ -236,6 +238,8 @@ function PageInner() {
             data: {
               ...data,
               labelText: data.labelText ?? "（名称）",
+              memo: data.memo ?? "",
+              photos: Array.isArray(data.photos) ? data.photos : [],
               rankTag: rankTag(rank),
               editable: mode === "edit",
             },
@@ -334,7 +338,13 @@ function PageInner() {
       const d: any = node.data;
       setSelected({
         kind: "taxon",
-        value: { id: node.id, labelText: d.labelText ?? "（名称）", rank: d.rank ?? "clade" },
+        value: {
+          id: node.id,
+          labelText: d.labelText ?? "（名称）",
+          rank: d.rank ?? "clade",
+          memo: d.memo ?? "",
+          photos: Array.isArray(d.photos) ? d.photos : [],
+        },
       });
       return;
     }
@@ -412,7 +422,7 @@ function PageInner() {
     return () => window.removeEventListener("keydown", handler);
   }, [mode, deleteSelected]);
 
-  /** Taxon編集：右ペイン入力→nodesへ反映 */
+  /** Taxon編集：右ペイン入力→nodesへ反映（memo/photosも含む） */
   const updateSelectedTaxon = useCallback(
     (patch: Partial<SelectedTaxon>) => {
       const id = patch.id ?? (selected?.kind === "taxon" ? selected.value.id : "");
@@ -427,10 +437,19 @@ function PageInner() {
 
             const nextLabel = patch.labelText ?? data.labelText ?? "（名称）";
             const nextRank = patch.rank ?? data.rank ?? "clade";
+            const nextMemo = patch.memo ?? data.memo ?? "";
+            const nextPhotos = patch.photos ?? (Array.isArray(data.photos) ? data.photos : []);
 
             return {
               ...n,
-              data: { ...data, labelText: nextLabel, rank: nextRank, rankTag: rankTag(nextRank) },
+              data: {
+                ...data,
+                labelText: nextLabel,
+                rank: nextRank,
+                memo: nextMemo,
+                photos: nextPhotos,
+                rankTag: rankTag(nextRank),
+              },
               style: {
                 ...(n.style ?? {}),
                 background: "white",
@@ -511,7 +530,7 @@ function PageInner() {
       id,
       type: "taxon",
       position: { x: 100, y: 100 },
-      data: { kind: "taxon", rank: "clade", labelText: "新しいノード" },
+      data: { kind: "taxon", rank: "clade", labelText: "新しいノード", memo: "", photos: [] },
       style: { background: "white", borderStyle: "solid", borderColor: "#111", ...rankStyle("clade") },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
@@ -609,7 +628,7 @@ function PageInner() {
           <ReactFlow
             nodes={nodes}
             edges={ensureEdges(edges)}
-            nodeTypes={nodeTypes}   // ✅ 固定した nodeTypes を使う
+            nodeTypes={nodeTypes}
             fitView
             minZoom={0.1}
             maxZoom={2.5}
@@ -625,7 +644,7 @@ function PageInner() {
             onEdgesChange={onEdgesChange}
             onConnect={mode === "edit" ? onConnect : undefined}
             onSelectionChange={onSelectionChange}
-            onNodeClick={onNodeClick} // ✅ クリック即時反映
+            onNodeClick={onNodeClick}
             onPaneClick={() => setSelectedIds({ nodes: [], edges: [] })}
           >
             <Background />
@@ -664,7 +683,9 @@ function PageInner() {
                     <input
                       className="w-full border rounded-lg px-2 py-2 text-sm"
                       value={selected.value.labelText}
-                      onChange={(e) => updateSelectedTaxon({ id: selected.value.id, labelText: e.target.value })}
+                      onChange={(e) =>
+                        updateSelectedTaxon({ id: selected.value.id, labelText: e.target.value })
+                      }
                     />
                   </div>
 
@@ -687,6 +708,66 @@ function PageInner() {
                     </select>
                   </div>
 
+                  <div className="mb-3">
+                    <div className="font-bold mb-1">メモ</div>
+                    <textarea
+                      className="w-full h-28 border rounded-lg p-2 text-sm"
+                      value={selected.value.memo ?? ""}
+                      onChange={(e) => updateSelectedTaxon({ id: selected.value.id, memo: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="mb-3">
+                    <div className="font-bold mb-1">写真</div>
+
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="w-full text-sm"
+                      onChange={async (e) => {
+                        const files = Array.from(e.target.files ?? []);
+                        if (files.length === 0) return;
+
+                        const toDataUrl = (file: File) =>
+                          new Promise<string>((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(String(reader.result));
+                            reader.onerror = reject;
+                            reader.readAsDataURL(file);
+                          });
+
+                        const urls = await Promise.all(files.map(toDataUrl));
+                        const current = selected.value.photos ?? [];
+                        updateSelectedTaxon({ id: selected.value.id, photos: [...current, ...urls] });
+
+                        e.currentTarget.value = "";
+                      }}
+                    />
+
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {(selected.value.photos ?? []).map((src, idx) => (
+                        <div key={idx} className="border rounded-lg p-1">
+                          <img src={src} className="w-full h-24 object-cover rounded" />
+                          <button
+                            className="mt-1 w-full px-2 py-1 border rounded text-xs"
+                            onClick={() => {
+                              const arr = [...(selected.value.photos ?? [])];
+                              arr.splice(idx, 1);
+                              updateSelectedTaxon({ id: selected.value.id, photos: arr });
+                            }}
+                          >
+                            この写真を削除
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-2 text-xs text-black/60">
+                      ※写真はこの端末のブラウザ内に保存されます（容量が大きいと保存できないことがあります）
+                    </div>
+                  </div>
+
                   <button
                     className="mt-2 w-full px-3 py-2 rounded-lg border text-sm"
                     onClick={() => {
@@ -707,6 +788,24 @@ function PageInner() {
                     <span className="font-bold">ランク：</span>
                     {selected.value.rank}（{rankTag(selected.value.rank)}）
                   </div>
+
+                  {selected.value.memo ? (
+                    <div className="mb-3">
+                      <div className="font-bold">メモ</div>
+                      <div className="mt-1 whitespace-pre-wrap">{selected.value.memo}</div>
+                    </div>
+                  ) : null}
+
+                  {(selected.value.photos ?? []).length > 0 ? (
+                    <div className="mb-3">
+                      <div className="font-bold">写真</div>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        {(selected.value.photos ?? []).map((src, idx) => (
+                          <img key={idx} src={src} className="w-full h-24 object-cover rounded border" />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>
@@ -732,7 +831,9 @@ function PageInner() {
                     <textarea
                       className="w-full h-24 border rounded-lg p-2 text-sm"
                       value={selected.value.structure}
-                      onChange={(e) => updateSelectedBP({ id: selected.value.id, structure: e.target.value })}
+                      onChange={(e) =>
+                        updateSelectedBP({ id: selected.value.id, structure: e.target.value })
+                      }
                     />
                   </div>
 
@@ -741,7 +842,9 @@ function PageInner() {
                     <textarea
                       className="w-full h-24 border rounded-lg p-2 text-sm"
                       value={selected.value.function}
-                      onChange={(e) => updateSelectedBP({ id: selected.value.id, function: e.target.value })}
+                      onChange={(e) =>
+                        updateSelectedBP({ id: selected.value.id, function: e.target.value })
+                      }
                     />
                   </div>
 
