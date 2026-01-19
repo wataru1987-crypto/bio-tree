@@ -218,6 +218,11 @@ function PageInner() {
   const [nodes, setNodes] = useState<Node[]>(initial.nodes);
   const [edges, setEdges] = useState<Edge[]>(initial.edges);
 
+  /** ✅ 遅延対策：nodeTypes を固定（毎レンダーで新オブジェクトを作らない） */
+  const nodeTypes = useMemo(() => {
+    return { taxon: TaxonNode, branchpoint: BranchpointNode };
+  }, []);
+
   const normalizeNodes = useCallback(
     (ns: Node[]) =>
       ns.map((n) => {
@@ -297,11 +302,18 @@ function PageInner() {
     const nextEdges = params.edges.map((e) => e.id).sort();
 
     setSelectedIds((prev) => {
-      const sameNodes = prev.nodes.length === nextNodes.length && prev.nodes.every((id, i) => id === nextNodes[i]);
-      const sameEdges = prev.edges.length === nextEdges.length && prev.edges.every((id, i) => id === nextEdges[i]);
+      const sameNodes =
+        prev.nodes.length === nextNodes.length && prev.nodes.every((id, i) => id === nextNodes[i]);
+      const sameEdges =
+        prev.edges.length === nextEdges.length && prev.edges.every((id, i) => id === nextEdges[i]);
       if (sameNodes && sameEdges) return prev;
       return { nodes: nextNodes, edges: nextEdges };
     });
+  }, []);
+
+  /** ✅ 遅延対策：クリック/タップで即 selectedIds を更新（パネルがすぐ反応） */
+  const onNodeClick = useCallback((_: any, node: Node) => {
+    setSelectedIds({ nodes: [node.id], edges: [] });
   }, []);
 
   /** 右ペインは「選択ID→nodesから引き直し」で作る（モード切替でも安定） */
@@ -585,24 +597,26 @@ function PageInner() {
           iPhone操作：
           <br />
           1本指=移動 / 2本指=ズーム
-          {mode === "edit" ? <><br />ノード端の点からドラッグで線追加</> : null}
+          {mode === "edit" ? (
+            <>
+              <br />
+              ノード端の点からドラッグで線追加
+            </>
+          ) : null}
         </div>
 
         <div className="h-full w-full" style={{ touchAction: "none" }}>
           <ReactFlow
             nodes={nodes}
             edges={ensureEdges(edges)}
-            nodeTypes={{ taxon: TaxonNode, branchpoint: BranchpointNode }}
+            nodeTypes={nodeTypes}   // ✅ 固定した nodeTypes を使う
             fitView
             minZoom={0.1}
             maxZoom={2.5}
-            // iPhone向け：スクロール/パン/ズームの挙動を安定させる
             panOnScroll
             zoomOnPinch
             zoomOnScroll={false}
-            // 選択の暴れ防止
             selectNodesOnDrag={false}
-            // 編集時だけノードをドラッグ・接続・線編集可能に
             nodesDraggable={mode === "edit"}
             nodesConnectable={mode === "edit"}
             edgesUpdatable={mode === "edit"}
@@ -611,6 +625,7 @@ function PageInner() {
             onEdgesChange={onEdgesChange}
             onConnect={mode === "edit" ? onConnect : undefined}
             onSelectionChange={onSelectionChange}
+            onNodeClick={onNodeClick} // ✅ クリック即時反映
             onPaneClick={() => setSelectedIds({ nodes: [], edges: [] })}
           >
             <Background />
@@ -649,9 +664,7 @@ function PageInner() {
                     <input
                       className="w-full border rounded-lg px-2 py-2 text-sm"
                       value={selected.value.labelText}
-                      onChange={(e) =>
-                        updateSelectedTaxon({ id: selected.value.id, labelText: e.target.value })
-                      }
+                      onChange={(e) => updateSelectedTaxon({ id: selected.value.id, labelText: e.target.value })}
                     />
                   </div>
 
@@ -662,6 +675,7 @@ function PageInner() {
                       value={selected.value.rank}
                       onChange={(e) => updateSelectedTaxon({ id: selected.value.id, rank: e.target.value })}
                     >
+                      <option value="domain">domain（ドメイン）</option>
                       <option value="kingdom">kingdom（界）</option>
                       <option value="phylum">phylum（門）</option>
                       <option value="class">class（綱）</option>
@@ -676,9 +690,7 @@ function PageInner() {
                   <button
                     className="mt-2 w-full px-3 py-2 rounded-lg border text-sm"
                     onClick={() => {
-                      // iPhone確実削除：選択IDに合わせて消せるように
-                      setSelectedIds((prev) => ({ ...prev, nodes: [selected.value.id] }));
-                      // 次のtickで消す（selectedIds反映待ち）
+                      setSelectedIds((prev) => ({ ...prev, nodes: [selected.value.id], edges: [] }));
                       setTimeout(() => deleteSelected(), 0);
                     }}
                   >
@@ -720,9 +732,7 @@ function PageInner() {
                     <textarea
                       className="w-full h-24 border rounded-lg p-2 text-sm"
                       value={selected.value.structure}
-                      onChange={(e) =>
-                        updateSelectedBP({ id: selected.value.id, structure: e.target.value })
-                      }
+                      onChange={(e) => updateSelectedBP({ id: selected.value.id, structure: e.target.value })}
                     />
                   </div>
 
@@ -731,16 +741,14 @@ function PageInner() {
                     <textarea
                       className="w-full h-24 border rounded-lg p-2 text-sm"
                       value={selected.value.function}
-                      onChange={(e) =>
-                        updateSelectedBP({ id: selected.value.id, function: e.target.value })
-                      }
+                      onChange={(e) => updateSelectedBP({ id: selected.value.id, function: e.target.value })}
                     />
                   </div>
 
                   <button
                     className="mt-2 w-full px-3 py-2 rounded-lg border text-sm"
                     onClick={() => {
-                      setSelectedIds((prev) => ({ ...prev, nodes: [selected.value.id] }));
+                      setSelectedIds((prev) => ({ ...prev, nodes: [selected.value.id], edges: [] }));
                       setTimeout(() => deleteSelected(), 0);
                     }}
                   >
